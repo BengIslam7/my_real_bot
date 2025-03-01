@@ -100,15 +100,16 @@ public:
   {
     std::stringstream ss;
     ss << "m " << val_1 << " " << val_2 << "\r";
+    std::cout << "Sent: m " << val1 << " " << val2 << std::endl;
     send_msg(ss.str());
   }
 
-  void set_pid_values(int k_p, int k_d, int k_i, int k_o)
+  /*void set_pid_values(int k_p, int k_d, int k_i, int k_o)
   {
     std::stringstream ss;
     ss << "u " << k_p << ":" << k_d << ":" << k_i << ":" << k_o << "\r";
     send_msg(ss.str());
-  }
+  }*/
 
 private:
     LibSerial::SerialPort serial_conn_;
