@@ -100,7 +100,6 @@ public:
   {
     std::stringstream ss;
     ss << "m " << val_1 << " " << val_2 << "\r";
-    std::cout << "Sent: m " << val1 << " " << val2 << std::endl;
     send_msg(ss.str());
   }
 
