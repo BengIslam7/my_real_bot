@@ -83,7 +83,7 @@ def generate_launch_description():
     # Launch!
     return LaunchDescription([
         controller_manager,
-        rviz_node,
+        #rviz_node,
         node_robot_state_publisher,
         slam_launch,
         diff_drive_controller,

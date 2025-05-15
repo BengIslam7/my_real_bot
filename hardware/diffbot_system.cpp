@@ -16,12 +16,22 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstddef>
+#include <iomanip>
 #include <limits>
 #include <memory>
+#include <sstream>
 #include <vector>
-
+#include <boost/asio.hpp>
+#include <boost/bind/bind.hpp>
+#include "hardware_interface/lexical_casts.hpp"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include <boost/asio.hpp>
+#include <boost/bind/bind.hpp>
+#include "hardware_interface/types/hardware_interface_return_values.hpp"
+#include "hardware_interface/types/hardware_interface_type_values.hpp"
+#include "pluginlib/class_list_macros.hpp"
 
 namespace diffdrive_arduino
 {
@@ -35,35 +45,15 @@ hardware_interface::CallbackReturn DiffDriveArduinoHardware::on_init(
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-
-  cfg_.left_wheel_name = info_.hardware_parameters["left_wheel_name"];
-  cfg_.right_wheel_name = info_.hardware_parameters["right_wheel_name"];
-  cfg_.rleft_wheel_name = info_.hardware_parameters["rleft_wheel_name"];
-  cfg_.rright_wheel_name = info_.hardware_parameters["rright_wheel_name"];
-  cfg_.loop_rate = std::stof(info_.hardware_parameters["loop_rate"]);
-  cfg_.device = info_.hardware_parameters["device"];
-  cfg_.baud_rate = std::stoi(info_.hardware_parameters["baud_rate"]);
-  cfg_.timeout_ms = std::stoi(info_.hardware_parameters["timeout_ms"]);
-  cfg_.enc_counts_per_rev = std::stoi(info_.hardware_parameters["enc_counts_per_rev"]);
-  if (info_.hardware_parameters.count("pid_p") > 0)
-  {
-    cfg_.pid_p = std::stoi(info_.hardware_parameters["pid_p"]);
-    cfg_.pid_d = std::stoi(info_.hardware_parameters["pid_d"]);
-    cfg_.pid_i = std::stoi(info_.hardware_parameters["pid_i"]);
-    cfg_.pid_o = std::stoi(info_.hardware_parameters["pid_o"]);
-  }
-  else
-  {
-    RCLCPP_INFO(rclcpp::get_logger("DiffDriveArduinoHardware"), "PID values not supplied, using defaults.");
-  }
+  port_name_ = info.hardware_parameters.at("device");
+  baud_rate_ = std::stoi(info.hardware_parameters.at("baud_rate"));
+  timeout_ms_ = std::stoi(info.hardware_parameters.at("timeout_ms"));
   
+  joint_velocity_command_.resize(2, 0.0);
+  joint_position_state_.resize(2, 0.0);
+  joint_velocity_state_.resize(2, 0.0);
 
-  wheel_l_.setup(cfg_.left_wheel_name, cfg_.enc_counts_per_rev);
-  wheel_r_.setup(cfg_.right_wheel_name, cfg_.enc_counts_per_rev);
-  wheel_rl_.setup(cfg_.rleft_wheel_name, cfg_.enc_counts_per_rev);
-  wheel_rr_.setup(cfg_.rright_wheel_name, cfg_.enc_counts_per_rev);
-
-
+ 
   for (const hardware_interface::ComponentInfo & joint : info_.joints)
   {
     // DiffBotSystem has exactly two states and one command interface on each joint
@@ -116,90 +106,34 @@ hardware_interface::CallbackReturn DiffDriveArduinoHardware::on_init(
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
-std::vector<hardware_interface::StateInterface> DiffDriveArduinoHardware::export_state_interfaces()
-{
-  std::vector<hardware_interface::StateInterface> state_interfaces;
-
-  state_interfaces.emplace_back(hardware_interface::StateInterface(
-    wheel_l_.name, hardware_interface::HW_IF_POSITION, &wheel_l_.pos));
-  state_interfaces.emplace_back(hardware_interface::StateInterface(
-    wheel_l_.name, hardware_interface::HW_IF_VELOCITY, &wheel_l_.vel));
-  state_interfaces.emplace_back(hardware_interface::StateInterface(
-    wheel_rl_.name, hardware_interface::HW_IF_POSITION, &wheel_rl_.pos));
-  state_interfaces.emplace_back(hardware_interface::StateInterface(
-    wheel_rl_.name, hardware_interface::HW_IF_VELOCITY, &wheel_rl_.vel));  
-
-  state_interfaces.emplace_back(hardware_interface::StateInterface(
-    wheel_r_.name, hardware_interface::HW_IF_POSITION, &wheel_r_.pos));
-  state_interfaces.emplace_back(hardware_interface::StateInterface(
-    wheel_r_.name, hardware_interface::HW_IF_VELOCITY, &wheel_r_.vel));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(
-      wheel_rr_.name, hardware_interface::HW_IF_POSITION, &wheel_rr_.pos));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(
-      wheel_rr_.name, hardware_interface::HW_IF_VELOCITY, &wheel_rr_.vel));
-
-  return state_interfaces;
-}
-
-std::vector<hardware_interface::CommandInterface> DiffDriveArduinoHardware::export_command_interfaces()
-{
-  std::vector<hardware_interface::CommandInterface> command_interfaces;
-
-  command_interfaces.emplace_back(hardware_interface::CommandInterface(
-    wheel_l_.name, hardware_interface::HW_IF_VELOCITY, &wheel_l_.cmd));
-
-  command_interfaces.emplace_back(hardware_interface::CommandInterface(
-    wheel_r_.name, hardware_interface::HW_IF_VELOCITY, &wheel_r_.cmd));
-
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(
-      wheel_rl_.name, hardware_interface::HW_IF_VELOCITY, &wheel_rl_.cmd));
-  
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(
-      wheel_rr_.name, hardware_interface::HW_IF_VELOCITY, &wheel_rr_.cmd));
-
-  return command_interfaces;
-}
-
 hardware_interface::CallbackReturn DiffDriveArduinoHardware::on_configure(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
-  RCLCPP_INFO(rclcpp::get_logger("DiffDriveArduinoHardware"), "Configuring ...please wait...");
-  if (comms_.connected())
-  {
-    comms_.disconnect();
-  }
-  comms_.connect(cfg_.device, cfg_.baud_rate, cfg_.timeout_ms);
-  RCLCPP_INFO(rclcpp::get_logger("DiffDriveArduinoHardware"), "Successfully configured!");
 
   return hardware_interface::CallbackReturn::SUCCESS;
 }
-
-hardware_interface::CallbackReturn DiffDriveArduinoHardware::on_cleanup(
-  const rclcpp_lifecycle::State & /*previous_state*/)
-{
-  RCLCPP_INFO(rclcpp::get_logger("DiffDriveArduinoHardware"), "Cleaning up ...please wait...");
-  if (comms_.connected())
-  {
-    comms_.disconnect();
-  }
-  RCLCPP_INFO(rclcpp::get_logger("DiffDriveArduinoHardware"), "Successfully cleaned up!");
-
-  return hardware_interface::CallbackReturn::SUCCESS;
-}
-
 
 hardware_interface::CallbackReturn DiffDriveArduinoHardware::on_activate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
-  RCLCPP_INFO(rclcpp::get_logger("DiffDriveArduinoHardware"), "Activating ...please wait...");
-  if (!comms_.connected())
-  {
-    return hardware_interface::CallbackReturn::ERROR;
+
+try {
+    serial_port_ = std::make_shared<boost::asio::serial_port>(io_service_, port_name_);
+    serial_port_->set_option(boost::asio::serial_port::baud_rate(baud_rate_));
+    serial_port_->set_option(boost::asio::serial_port::flow_control(
+      boost::asio::serial_port::flow_control::none));
+      serial_port_->set_option(boost::asio::serial_port_base::parity(boost::asio::serial_port_base::parity::none));
+    serial_port_->set_option(boost::asio::serial_port_base::stop_bits(boost::asio::serial_port_base::stop_bits::one));
+    io_thread_ = boost::thread([this]() { io_service_.run(); });
+    
+
+    RCLCPP_INFO(rclcpp::get_logger("RobotSystem"), "Connected to %s at %d baud", 
+                port_name_.c_str(), baud_rate_);
+  } catch (const boost::system::system_error &e) {
+    RCLCPP_FATAL(rclcpp::get_logger("RobotSystem"), "Port open failed: %s", e.what());
+    return CallbackReturn::ERROR;
   }
-  if (cfg_.pid_p > 0)
-  {
-    //comms_.set_pid_values(cfg_.pid_p,cfg_.pid_d,cfg_.pid_i,cfg_.pid_o);
-  }
+
   RCLCPP_INFO(rclcpp::get_logger("DiffDriveArduinoHardware"), "Successfully activated!");
 
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -208,31 +142,40 @@ hardware_interface::CallbackReturn DiffDriveArduinoHardware::on_activate(
 hardware_interface::CallbackReturn DiffDriveArduinoHardware::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
-  RCLCPP_INFO(rclcpp::get_logger("DiffDriveArduinoHardware"), "Deactivating ...please wait...");
-  RCLCPP_INFO(rclcpp::get_logger("DiffDriveArduinoHardware"), "Successfully deactivated!");
 
-  return hardware_interface::CallbackReturn::SUCCESS;
+if (serial_port_) {
+    serial_port_->cancel();
+    serial_port_->close();
+    serial_port_.reset();
+  }
+  io_service_.stop();
+  if (io_thread_.joinable()) io_thread_.join();
+  return CallbackReturn::SUCCESS;
+
+}
+
+std::vector<hardware_interface::StateInterface> DiffDriveArduinoHardware::export_state_interfaces()
+ {
+  std::vector<hardware_interface::StateInterface> state_interfaces;
+    state_interfaces.emplace_back("base_left_wheel_joint", "position", &joint_position_state_[0]);
+    state_interfaces.emplace_back("base_left_wheel_joint", "velocity", &joint_velocity_state_[0]);
+    state_interfaces.emplace_back("base_right_wheel_joint", "position", &joint_position_state_[1]);
+    state_interfaces.emplace_back("base_right_wheel_joint", "velocity", &joint_velocity_state_[1]);
+
+  return state_interfaces;
+ }
+
+std::vector<hardware_interface::CommandInterface> DiffDriveArduinoHardware::export_command_interfaces()
+{
+  std::vector<hardware_interface::CommandInterface> command_interfaces;
+    command_interfaces.emplace_back("base_left_wheel_joint", "velocity", &joint_velocity_command_[0]);
+    command_interfaces.emplace_back("base_right_wheel_joint", "velocity", &joint_velocity_command_[1]);
+  return command_interfaces;
 }
 
 hardware_interface::return_type DiffDriveArduinoHardware::read(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & period)
 {
-  if (!comms_.connected())
-  {
-    return hardware_interface::return_type::ERROR;
-  }
-
-  comms_.read_encoder_values(wheel_l_.enc, wheel_r_.enc);
-
-  double delta_seconds = period.seconds();
-
-  double pos_prev = wheel_l_.pos;
-  wheel_l_.pos = wheel_l_.calc_enc_angle();
-  wheel_l_.vel = (wheel_l_.pos - pos_prev) / delta_seconds;
-
-  pos_prev = wheel_r_.pos;
-  wheel_r_.pos = wheel_r_.calc_enc_angle();
-  wheel_r_.vel = (wheel_r_.pos - pos_prev) / delta_seconds;
 
   return hardware_interface::return_type::OK;
 }
@@ -240,18 +183,20 @@ hardware_interface::return_type DiffDriveArduinoHardware::read(
 hardware_interface::return_type diffdrive_arduino ::DiffDriveArduinoHardware::write(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  if (!comms_.connected())
-  {
+if (!serial_port_ || !serial_port_->is_open()) {
     return hardware_interface::return_type::ERROR;
   }
 
-  int motor_l_counts_per_loop = wheel_l_.cmd / wheel_l_.rads_per_count / cfg_.loop_rate;
-  int motor_r_counts_per_loop = wheel_r_.cmd / wheel_r_.rads_per_count / cfg_.loop_rate;
-  comms_.set_motor_values(motor_l_counts_per_loop, motor_r_counts_per_loop);
+  boost::mutex::scoped_lock lock(mutex_);
+  std::stringstream cmd;
+  cmd << "M " << joint_velocity_command_[0] << " " << joint_velocity_command_[1] << "\n" ;
 
-  /*int motor_rl_counts_per_loop = wheel_rl_.cmd / wheel_rl_.rads_per_count / cfg_.loop_rate;
-  int motor_rr_counts_per_loop = wheel_rr_.cmd / wheel_rr_.rads_per_count / cfg_.loop_rate;
-  comms_.set_motor_values(motor_rl_counts_per_loop, motor_rr_counts_per_loop);*/
+  try {
+    serial_port_->write_some(boost::asio::buffer(cmd.str()));
+  } catch (const boost::system::system_error &e) {
+    RCLCPP_ERROR(rclcpp::get_logger("RobotSystem"), "Write failed: %s", e.what());
+    return hardware_interface::return_type::ERROR;
+  }
   return hardware_interface::return_type::OK;
 }
 

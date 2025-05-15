@@ -16,8 +16,8 @@ diff_cont:
 
     base_frame_id: base_footprint
 
-    left_wheel_names: ['base_left_wheel_joint','base_left_wheel2_joint']
-    right_wheel_names: ['base_right_wheel_joint','base_right_wheel2_joint']
+    left_wheel_names: ['base_left_wheel_joint']
+    right_wheel_names: ['base_right_wheel_joint']
     wheel_separation: 0.57
     wheel_radius: 0.05
 

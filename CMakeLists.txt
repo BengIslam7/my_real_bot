@@ -62,6 +62,18 @@ install(TARGETS diffdrive_arduino
   RUNTIME DESTINATION bin
 )
 
+# After ament_target_dependencies(), add:
+target_link_libraries(${PROJECT_NAME} PRIVATE
+  Boost::thread  # Modern CMake style (preferred over ${Boost_LIBRARIES})
+)
+
+
+
+find_package(pluginlib REQUIRED)
+
+# Add this near other find_package calls
+find_package(Boost REQUIRED COMPONENTS thread)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
 endif()
